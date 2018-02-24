@@ -31,9 +31,6 @@ import com.android.volley.toolbox.BasicNetwork;
 import com.android.volley.toolbox.DiskBasedCache;
 import com.android.volley.toolbox.HurlStack;
 import com.android.volley.toolbox.StringRequest;
-import com.google.common.util.concurrent.SimpleTimeLimiter;
-import com.google.common.util.concurrent.TimeLimiter;
-import com.google.common.util.concurrent.UncheckedTimeoutException;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -226,17 +223,12 @@ public class BasicService extends Service {
 
         private Socket clientSocket;
         private BufferedReader input;
-        private  TimeLimiter timeLimiter;
-
-
 
         public Thread2(Socket clientSocket) {
             this.clientSocket = clientSocket;
-
             try {
-                this.input = new BufferedReader(new InputStreamReader(this.clientSocket.getInputStream()));
                 Log.d("getting input", "true");
-
+                this.input = new BufferedReader(new InputStreamReader(this.clientSocket.getInputStream()));
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -244,45 +236,34 @@ public class BasicService extends Service {
         //run the service and handle incoming data
         public void run() {
             while (!Thread.currentThread().isInterrupted()) {
-
-                String read = null;
-
                 try {
-                    read = input.readLine();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                    String read = input.readLine();
 
-                //fallback on the cloud in case of connection issue with Arduino
-                if (read == null)
-                {
+                    if (read != null) {
+                        if (read.equals("1-EOF-")) {
 
-                }
+                            SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+                            String blynkauthset = settings.getString("blynkauth", "");
+                            Log.d("blynk is", "blynkauthset");
 
-                if (read != null) {
-                    Log.d("readafter", read);
-                    if (read.equals("1-EOF-")) {
+                            RequestQueue mRequestQueue;
+                            // Instantiate the cache
+                            Cache cache = new DiskBasedCache(getCacheDir(), 1024 * 1024); // 1MB cap
+                            // Set up the network to use HttpURLConnection as the HTTP client.
+                            Network network = new BasicNetwork(new HurlStack());
+                            // Instantiate the RequestQueue with the cache and network.
+                            mRequestQueue = new RequestQueue(cache, network);
+                            // Start the queue
+                            mRequestQueue.start();
+                            String url = "http://blynk-cloud.com/" + blynkauthset + "/get/V4";
+                            // Formulate the request and handle the response.
+                            StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                                    new Response.Listener<String>() {
+                                        @Override
+                                        public void onResponse(String response) {
+                                            //extract only integers from response string, I.E the show ID
+                                            String nfxID = response.replaceAll("\\D+", "");
 
-                        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
-                        String blynkauthset = settings.getString("blynkauth", "");
-
-                        RequestQueue mRequestQueue;
-                        // Instantiate the cache
-                        Cache cache = new DiskBasedCache(getCacheDir(), 1024 * 1024); // 1MB cap
-                        // Set up the network to use HttpURLConnection as the HTTP client.
-                        Network network = new BasicNetwork(new HurlStack());
-                        // Instantiate the RequestQueue with the cache and network.
-                        mRequestQueue = new RequestQueue(cache, network);
-                        // Start the queue
-                        mRequestQueue.start();
-                        String url ="http://blynk-cloud.com/"+blynkauthset+"/get/V4";
-                        // Formulate the request and handle the response.
-                        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
-                                new Response.Listener<String>() {
-                                    @Override
-                                    public void onResponse(String response) {
-                                        //extract only integers from response string, I.E the show ID
-                                        String nfxID = response.replaceAll("\\D+","");;
 
                                         /*//fallback if I decide to send all the IDs instead of just the latest
                                         if (nfxID.length() != 8)
@@ -290,16 +271,16 @@ public class BasicService extends Service {
                                             nfxID = nfxID.substring(0,7);
                                         }*/
 
-                                        String watchUrl = "http://www.netflix.com/watch/"+nfxID;
+                                            String watchUrl = "http://www.netflix.com/watch/" + nfxID;
 
-                                        try {
+                                            try {
 
-                                            Intent intent = new Intent(Intent.ACTION_VIEW);
-                                            intent.setClassName("com.netflix.mediaclient", "com.netflix.mediaclient.ui.launch.UIWebViewActivity");
-                                            intent.setData(Uri.parse(watchUrl));
-                                            startActivity(intent);
+                                                Intent intent = new Intent(Intent.ACTION_VIEW);
+                                                intent.setClassName("com.netflix.mediaclient", "com.netflix.mediaclient.ui.launch.UIWebViewActivity");
+                                                intent.setData(Uri.parse(watchUrl));
+                                                startActivity(intent);
 
-                                            //Other way of launching video service
+                                                //Other way of launching video service
                                             /*
                                             Intent nfxID = new Intent();
                                             nfx.setAction(Intent.ACTION_VIEW);
@@ -307,255 +288,247 @@ public class BasicService extends Service {
                                             nfx.putExtra("source","30"); // careful: String, not int
                                             nfx.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK);
                                             startActivity(nfx);*/
+                                            } catch (Exception e) {
+                                            }
+
                                         }
-                                        catch(Exception e)
-                                        {
+                                    },
+                                    new Response.ErrorListener() {
+                                        @Override
+                                        public void onErrorResponse(VolleyError error) {
+
                                         }
-
-                                    }
-                                },
-                                new Response.ErrorListener() {
-                                    @Override
-                                    public void onErrorResponse(VolleyError error) {
-
-                                    }
-                                });
-                        // Add the request to the RequestQueue.
-                        mRequestQueue.add(stringRequest);
-                    }
-                    else
-                    {   //music services
-                        if (read.equals("2-EOF-"))
-                        {
-                            SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
-                            String blynkauthset = settings.getString("blynkauth", "");
-                            String url ="http://blynk-cloud.com/"+blynkauthset+"/get/V2";
-
-                            try {
-
-                                OkHttpClient client = new OkHttpClient();
-
-                                okhttp3.Request request = new okhttp3.Request.Builder()
-                                        .url(url)
-                                        .build();
-
-                                okhttp3.Response response = client.newCall(request).execute();
-                                String resp = response.body().string();
-
-                                String[] ips = new String[3];
-                                //Clean response and get only the IPs
-                                String ipresponse = resp.substring(2,resp.length()-2);
-                                //get index of fourth dot
-                                int fourth = ordinalIndexOf(ipresponse, ".",4);
-                                //get first IP
-                                ips[0] = ipresponse.substring(0,fourth);
-                                Log.d("ip 1", ips[0]);
-                                //get index of eighth dot
-                                int eighth = ordinalIndexOf(ipresponse, ".",8);
-                                //get second IP
-                                ips[1] = ipresponse.substring(fourth+1,eighth);
-                                Log.d("ip 2", ips[1]);
-                                int end = ipresponse.length();
-                                //get third IP
-                                ips[2] = ipresponse.substring(eighth+1,end);
-                                Log.d("ip 3", ips[2]);;
-
-                            }
-                            catch (Exception spe)
-                            {
-
-                            }
-
-                            //press the play button
-                            Intent i = new Intent(Intent.ACTION_MEDIA_BUTTON);
-                            i.setComponent(new ComponentName("com.spotify.music", "com.spotify.music.internal.receiver.MediaButtonReceiver"));
-                            i.putExtra(Intent.EXTRA_KEY_EVENT,new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY));
-                            sendOrderedBroadcast(i, null);
-
-                            i = new Intent(Intent.ACTION_MEDIA_BUTTON);
-                            i.setComponent(new ComponentName("com.spotify.music", "com.spotify.music.internal.receiver.MediaButtonReceiver"));
-                            i.putExtra(Intent.EXTRA_KEY_EVENT,new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY));
-                            sendOrderedBroadcast(i, null);
-                                try {
-                                    Thread.sleep(1750);
-                                }
-                                catch (Exception e)
-                                {
-
-                                }
-
-                            if (IsAudioRunning() == false)
-                            {
-                                Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.spotify.music");
-                                if (launchIntent != null) {
-                                    startActivity(launchIntent);//null pointer check in case package name was not found
-                                }
-                                //send play intent after the app has loaded
-                                new SendtoSpotify().execute();
-                            }
-
-                        }
-                        else
-                        {   //vlc media player
-                            if (read.equals("3-EOF-"))
-                            {
-
+                                    });
+                            // Add the request to the RequestQueue.
+                            mRequestQueue.add(stringRequest);
+                        } else {   //music services
+                            if (read.equals("2-EOF-")) {
                                 SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
                                 String blynkauthset = settings.getString("blynkauth", "");
-                                Log.d("blynkauth",blynkauthset);
+                                String url = "http://blynk-cloud.com/" + blynkauthset + "/get/V2";
 
-                                RequestQueue mRequestQueue;
-                                // Instantiate the cache
-                                Cache cache = new DiskBasedCache(getCacheDir(), 1024 * 1024); // 1MB cap
-                                // Set up the network to use HttpURLConnection as the HTTP client.
-                                Network network = new BasicNetwork(new HurlStack());
-                                // Instantiate the RequestQueue with the cache and network.
-                                mRequestQueue = new RequestQueue(cache, network);
-                                // Start the queue
-                                mRequestQueue.start();
-                                String url ="http://blynk-cloud.com/"+blynkauthset+"/get/V2";
-                                // Formulate the request and handle the response.
-                                StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
-                                        new Response.Listener<String>() {
-                                            @Override
-                                            public void onResponse(String response) {
-                                                String[] ips = new String[3];
-                                                //Clean response and get only the IPs
-                                                String ipresponse = response.substring(2,response.length()-2);
-                                                //get index of fourth dot
-                                                int fourth = ordinalIndexOf(ipresponse, ".",4);
-                                                //get first IP
-                                                ips[0] = ipresponse.substring(0,fourth);
-                                                Log.d("ip 1", ips[0]);
-                                                //get index of eighth dot
-                                                int eighth = ordinalIndexOf(ipresponse, ".",8);
-                                                //get second IP
-                                                ips[1] = ipresponse.substring(fourth+1,eighth);
-                                                Log.d("ip 2", ips[1]);
-                                                //get third IP
-                                                ips[2] = ipresponse.substring(eighth+1,ipresponse.length());
-                                                Log.d("ip 3", ips[2]);;
-                                                //get current position of video response
-                                                String gotresponse = "";
-                                                //get file location response
-                                                String gotresponse2 = "";
-                                                //figure out where VLC is running at the moment
-                                                for (int i=0; i<ips.length; i++)
-                                                {
-                                                    OkHttpClient client = new OkHttpClient.Builder()
-                                                            .addInterceptor(new BasicAuthInterceptor("", "streamyarduino2018"))
-                                                            .build();
+                                try {
 
-                                                    okhttp3.Request request = new okhttp3.Request.Builder()
-                                                            .url("http://"+ips[i]+":8080/requests/status.xml")
-                                                            .build();
-                                                    try {
-                                                        okhttp3.Response responses = client.newCall(request).execute();
-                                                        gotresponse = responses.body().string();
-                                                        if (gotresponse != "" || gotresponse != null)
-                                                        {
-                                                            //get current time in milliseconds
-                                                            int currtime = (Integer.parseInt(gotresponse.substring(gotresponse.indexOf("<time>")+6,gotresponse.indexOf("</time>"))))*1000;
-                                                            //get location of file
-                                                            OkHttpClient client2 = new OkHttpClient.Builder()
-                                                                    .addInterceptor(new BasicAuthInterceptor("", "streamyarduino2018"))
-                                                                    .build();
+                                    OkHttpClient client = new OkHttpClient();
 
-                                                            okhttp3.Request request2 = new okhttp3.Request.Builder()
-                                                                    .url("http://"+ips[i]+":8080/requests/playlist.xml")
-                                                                    .build();
-                                                            try {
-                                                                okhttp3.Response responses2 = client.newCall(request2).execute();
-                                                                gotresponse2 = responses2.body().string();
-                                                                //Log.d("second response is", gotresponse2);
-                                                                //parse location of file
-                                                                if ((gotresponse2.lastIndexOf("file:///") != -1) && (gotresponse2.indexOf("current=") != -1))
-                                                                {
-                                                                    String clean = gotresponse2.substring(gotresponse2.lastIndexOf("file:///")+11,gotresponse2.indexOf("current=")-2);
-                                                                    //URI with IP
-                                                                    String fileuri = ips[i]+ "/"+ clean;
-                                                                    //path without IP
-                                                                    String filename = clean.substring(clean.lastIndexOf("/"),clean.length());
+                                    okhttp3.Request request = new okhttp3.Request.Builder()
+                                            .url(url)
+                                            .build();
 
-                                                                    Log.d("clean is", clean);
-                                                                    Log.d("fileurl is", fileuri);
-                                                                    Log.d("filname is", filename);
+                                    okhttp3.Response response = client.newCall(request).execute();
+                                    String resp = response.body().string();
 
-                                                                    //subtitles are not really auto loading even though VLC settings are enabled, also need to check if subtitles file exist
-                                                                    //before putting it in vlcIntent.... so I turned this feature off
-                                                                    //String subtitles = fileuri.substring(0, fileuri.lastIndexOf(".")) + ".srt";
-                                                                    //subtitles = subtitles.replace("/","//");
-                                                                    int count = fileuri.length() - fileuri.replaceAll("/","").length();
-                                                                    //fileuri = fileuri.replace("/","//");
+                                    String[] ips = new String[3];
+                                    //Clean response and get only the IPs
+                                    String ipresponse = resp.substring(2, resp.length() - 2);
+                                    //get index of fourth dot
+                                    int fourth = ordinalIndexOf(ipresponse, ".", 4);
+                                    //get first IP
+                                    ips[0] = ipresponse.substring(0, fourth);
+                                    Log.d("ip 1", ips[0]);
+                                    //get index of eighth dot
+                                    int eighth = ordinalIndexOf(ipresponse, ".", 8);
+                                    //get second IP
+                                    ips[1] = ipresponse.substring(fourth + 1, eighth);
+                                    Log.d("ip 2", ips[1]);
+                                    int end = ipresponse.length();
+                                    //get third IP
+                                    ips[2] = ipresponse.substring(eighth + 1, end);
+                                    Log.d("ip 3", ips[2]);
+                                    ;
 
-                                                                    //try all the path files to see which one is the correct file, this saves the user from configuring the folder every time.
+                                } catch (Exception spe) {
+
+                                }
+
+                                //press the play button
+                                Intent i = new Intent(Intent.ACTION_MEDIA_BUTTON);
+                                i.setComponent(new ComponentName("com.spotify.music", "com.spotify.music.internal.receiver.MediaButtonReceiver"));
+                                i.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY));
+                                sendOrderedBroadcast(i, null);
+
+                                i = new Intent(Intent.ACTION_MEDIA_BUTTON);
+                                i.setComponent(new ComponentName("com.spotify.music", "com.spotify.music.internal.receiver.MediaButtonReceiver"));
+                                i.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY));
+                                sendOrderedBroadcast(i, null);
+                                try {
+                                    Thread.sleep(1750);
+                                } catch (Exception e) {
+
+                                }
+
+                                if (IsAudioRunning() == false) {
+                                    Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.spotify.music");
+                                    if (launchIntent != null) {
+                                        startActivity(launchIntent);//null pointer check in case package name was not found
+                                    }
+                                    //send play intent after the app has loaded
+                                    new SendtoSpotify().execute();
+                                }
+
+                            } else {   //vlc media player
+                                if (read.equals("3-EOF-")) {
+
+                                    SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+                                    String blynkauthset = settings.getString("blynkauth", "");
+                                    Log.d("blynkauth", blynkauthset);
+
+                                    RequestQueue mRequestQueue;
+                                    // Instantiate the cache
+                                    Cache cache = new DiskBasedCache(getCacheDir(), 1024 * 1024); // 1MB cap
+                                    // Set up the network to use HttpURLConnection as the HTTP client.
+                                    Network network = new BasicNetwork(new HurlStack());
+                                    // Instantiate the RequestQueue with the cache and network.
+                                    mRequestQueue = new RequestQueue(cache, network);
+                                    // Start the queue
+                                    mRequestQueue.start();
+                                    String url = "http://blynk-cloud.com/" + blynkauthset + "/get/V2";
+                                    // Formulate the request and handle the response.
+                                    StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                                            new Response.Listener<String>() {
+                                                @Override
+                                                public void onResponse(String response) {
+                                                    String[] ips = new String[3];
+                                                    //Clean response and get only the IPs
+                                                    String ipresponse = response.substring(2, response.length() - 2);
+                                                    //get index of fourth dot
+                                                    int fourth = ordinalIndexOf(ipresponse, ".", 4);
+                                                    //get first IP
+                                                    ips[0] = ipresponse.substring(0, fourth);
+                                                    Log.d("ip 1", ips[0]);
+                                                    //get index of eighth dot
+                                                    int eighth = ordinalIndexOf(ipresponse, ".", 8);
+                                                    //get second IP
+                                                    ips[1] = ipresponse.substring(fourth + 1, eighth);
+                                                    Log.d("ip 2", ips[1]);
+                                                    //get third IP
+                                                    ips[2] = ipresponse.substring(eighth + 1, ipresponse.length());
+                                                    Log.d("ip 3", ips[2]);
+                                                    ;
+                                                    //get current position of video response
+                                                    String gotresponse = "";
+                                                    //get file location response
+                                                    String gotresponse2 = "";
+                                                    //figure out where VLC is running at the moment
+                                                    for (int i = 0; i < ips.length; i++) {
+                                                        OkHttpClient client = new OkHttpClient.Builder()
+                                                                .addInterceptor(new BasicAuthInterceptor("", "streamyarduino2018"))
+                                                                .build();
+
+                                                        okhttp3.Request request = new okhttp3.Request.Builder()
+                                                                .url("http://" + ips[i] + ":8080/requests/status.xml")
+                                                                .build();
+                                                        try {
+                                                            okhttp3.Response responses = client.newCall(request).execute();
+                                                            gotresponse = responses.body().string();
+                                                            if (gotresponse != "" || gotresponse != null) {
+                                                                //get current time in milliseconds
+                                                                int currtime = (Integer.parseInt(gotresponse.substring(gotresponse.indexOf("<time>") + 6, gotresponse.indexOf("</time>")))) * 1000;
+                                                                //get location of file
+                                                                OkHttpClient client2 = new OkHttpClient.Builder()
+                                                                        .addInterceptor(new BasicAuthInterceptor("", "streamyarduino2018"))
+                                                                        .build();
+
+                                                                okhttp3.Request request2 = new okhttp3.Request.Builder()
+                                                                        .url("http://" + ips[i] + ":8080/requests/playlist.xml")
+                                                                        .build();
+                                                                try {
+                                                                    okhttp3.Response responses2 = client.newCall(request2).execute();
+                                                                    gotresponse2 = responses2.body().string();
+                                                                    //Log.d("second response is", gotresponse2);
+                                                                    //parse location of file
+                                                                    if ((gotresponse2.lastIndexOf("file:///") != -1) && (gotresponse2.indexOf("current=") != -1)) {
+                                                                        String clean = gotresponse2.substring(gotresponse2.lastIndexOf("file:///") + 11, gotresponse2.indexOf("current=") - 2);
+                                                                        //URI with IP
+                                                                        String fileuri = ips[i] + "/" + clean;
+                                                                        //path without IP
+                                                                        String filename = clean.substring(clean.lastIndexOf("/"), clean.length());
+
+                                                                        Log.d("clean is", clean);
+                                                                        Log.d("fileurl is", fileuri);
+                                                                        Log.d("filname is", filename);
+
+                                                                        //subtitles are not really auto loading even though VLC settings are enabled, also need to check if subtitles file exist
+                                                                        //before putting it in vlcIntent.... so I turned this feature off
+                                                                        //String subtitles = fileuri.substring(0, fileuri.lastIndexOf(".")) + ".srt";
+                                                                        //subtitles = subtitles.replace("/","//");
+                                                                        int count = fileuri.length() - fileuri.replaceAll("/", "").length();
+                                                                        //fileuri = fileuri.replace("/","//");
+
+                                                                        //try all the path files to see which one is the correct file, this saves the user from configuring the folder every time.
                                                                         try {
                                                                             SmbFile sFile = new SmbFile("smb://" + fileuri.replace("/", "//"));
                                                                             if (sFile.exists()) {
                                                                                 fileuri = fileuri.replace("/", "//");
                                                                             }
                                                                         } catch (Exception e) {
-                                                                            for (int x=0; x<count-1; x++) {
+                                                                            for (int x = 0; x < count - 1; x++) {
                                                                                 try {
-                                                                                    SmbFile sFile = new SmbFile("smb://"+ips[i]+"//"+clean.replace("/","//"));
+                                                                                    SmbFile sFile = new SmbFile("smb://" + ips[i] + "//" + clean.replace("/", "//"));
                                                                                     if (sFile.exists()) {
-                                                                                        fileuri = ips[i]+"//"+clean.replace("/","//");
+                                                                                        fileuri = ips[i] + "//" + clean.replace("/", "//");
                                                                                         x = count;
 
                                                                                     }
                                                                                 } catch (Exception ex) {
-                                                                                    clean = clean.substring(clean.indexOf("/")+1,clean.length());
+                                                                                    clean = clean.substring(clean.indexOf("/") + 1, clean.length());
                                                                                 }
                                                                             }
                                                                         }
-                                                                    //launch intent
-                                                                    Uri uri = Uri.parse("smb://"+fileuri);
-                                                                    Intent vlcIntent = new Intent(Intent.ACTION_VIEW);
-                                                                    vlcIntent.setPackage("org.videolan.vlc");
-                                                                    vlcIntent.setDataAndTypeAndNormalize(uri, "video/*");
-                                                                    //vlcIntent.putExtra("from_start", false);
-                                                                    vlcIntent.putExtra("position", currtime);
-                                                                    //vlcIntent.putExtra("subtitles_location", "smb://"+subtitles);
-                                                                    //Intent launchIntent = getPackageManager().getLaunchIntentForPackage("org.videolan.vlc");
-                                                                    if (vlcIntent != null) {
-                                                                        startActivity(vlcIntent);//null pointer check in case package name was not found
+                                                                        //launch intent
+                                                                        Uri uri = Uri.parse("smb://" + fileuri);
+                                                                        Intent vlcIntent = new Intent(Intent.ACTION_VIEW);
+                                                                        vlcIntent.setPackage("org.videolan.vlc");
+                                                                        vlcIntent.setDataAndTypeAndNormalize(uri, "video/*");
+                                                                        //vlcIntent.putExtra("from_start", false);
+                                                                        vlcIntent.putExtra("position", currtime);
+                                                                        //vlcIntent.putExtra("subtitles_location", "smb://"+subtitles);
+                                                                        //Intent launchIntent = getPackageManager().getLaunchIntentForPackage("org.videolan.vlc");
+                                                                        if (vlcIntent != null) {
+                                                                            startActivity(vlcIntent);//null pointer check in case package name was not found
+                                                                        }
                                                                     }
+
+
+                                                                } catch (IOException e) {
+                                                                    e.printStackTrace();
                                                                 }
 
 
-                                                            } catch (IOException e) {
-                                                                e.printStackTrace();
+                                                                //stop the loop
+                                                                i = ips.length;
                                                             }
 
-
-                                                            //stop the loop
-                                                            i = ips.length;
+                                                        } catch (IOException e) {
+                                                            e.printStackTrace();
                                                         }
 
-                                                    } catch (IOException e) {
-                                                        e.printStackTrace();
                                                     }
 
                                                 }
+                                            },
+                                            new Response.ErrorListener() {
+                                                @Override
+                                                public void onErrorResponse(VolleyError error) {
 
-                                            }
-                                        },
-                                        new Response.ErrorListener() {
-                                            @Override
-                                            public void onErrorResponse(VolleyError error) {
-
-                                            }
-                                        });
-                                // Add the request to the RequestQueue.
-                                mRequestQueue.add(stringRequest);
+                                                }
+                                            });
+                                    // Add the request to the RequestQueue.
+                                    mRequestQueue.add(stringRequest);
+                                }
                             }
                         }
+                    } else {
+                        Thread1 = new Thread(new Thread1());
+                        Thread1.start();
+                        return;
                     }
-                } else {
-                    Thread1 = new Thread(new Thread1());
-                    Thread1.start();
-                    return;
                 }
+                catch (IOException ex)
+                {
+                    ex.printStackTrace();
+                }
+
             }
         }
     }
